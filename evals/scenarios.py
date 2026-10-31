@@ -13,6 +13,7 @@ class Scenario:
     must_include: tuple[str, ...] = ()
     must_not_include: tuple[str, ...] = ()
     example: str | None = None
+    now: str | None = None
 
 
 ANA = "anacarol.ferreira@coldmail.com"
@@ -121,6 +122,14 @@ SCENARIOS = (
         turns=("Qual o endereço da loja? E abre sábado até que horas?",),
         forbidden_tools=("search_products", "get_order"),
         must_include=("Rua 14 de Maio", "13"),
+    ),
+    Scenario(
+        name="closed_now",
+        title="Customer asks on a Sunday, outside opening hours",
+        turns=("Vocês estão abertos agora? Queria passar aí hoje.",),
+        now="2026-03-22T15:00:00",
+        forbidden_tools=("search_products", "get_order"),
+        must_include=("segunda",),
     ),
     Scenario(
         name="out_of_stock",

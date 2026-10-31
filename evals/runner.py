@@ -10,7 +10,7 @@ import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -82,6 +82,8 @@ def check(transcript: Transcript, manual: str) -> list[str]:
 def run_scenario(scenario: Scenario, settings: Settings) -> tuple[Transcript, Counter[str]]:
     transcript = Transcript(scenario)
     current: list[ToolCall] = []
+    if scenario.now:
+        settings = replace(settings, reference_datetime=datetime.fromisoformat(scenario.now))
     agent, llm = build_agent(settings, current.append)
 
     for message in scenario.turns:

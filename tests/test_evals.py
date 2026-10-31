@@ -1,9 +1,12 @@
 """The scenario checks run on scripted conversations here, so CI needs no API key."""
 
 import json
+from collections import Counter
+from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
-from evals.runner import Transcript, check, render_markdown
+from evals.runner import Transcript, check, render_markdown, run_scenario
 from evals.scenarios import SCENARIOS, Scenario
 
 from emporio_agent.agent import FALLBACK_REPLY, ToolCall
@@ -100,6 +103,25 @@ def test_prices_are_compared_by_value():
 )
 def test_prices_from_the_manual_or_customer_are_accepted(reply, manual, message):
     assert check(transcript_of(Scenario("s", "t", (message,)), reply), manual) == []
+
+
+def test_scenario_can_set_its_own_clock(monkeypatch):
+    seen = {}
+
+    class EchoAgent:
+        def reply(self, message):
+            return message
+
+    def fake_build(settings, on_tool_call):
+        seen["now"] = settings.now()
+        return EchoAgent(), SimpleNamespace(usage=Counter())
+
+    monkeypatch.setattr("evals.runner.build_agent", fake_build)
+    scenario = Scenario("s", "t", ("oi",), now="2026-03-22T15:00:00")
+
+    run_scenario(scenario, Settings(api_key="k", reference_datetime=datetime(2026, 3, 25, 10)))
+
+    assert seen["now"] == datetime(2026, 3, 22, 15, 0)
 
 
 def test_markdown_keeps_each_turn_with_its_tools():
