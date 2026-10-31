@@ -3,25 +3,23 @@
 from copy import copy
 from types import SimpleNamespace
 
-
-def text_block(text):
-    return SimpleNamespace(type="text", text=text)
+from emporio_agent.llm import LLMResponse, ToolRequest
 
 
-def tool_block(name, block_id="call_1", **arguments):
-    return SimpleNamespace(type="tool_use", id=block_id, name=name, input=arguments)
-
-
-def response(*content, stop_reason="end_turn"):
-    return SimpleNamespace(stop_reason=stop_reason, content=list(content))
+def tool_request(name, request_id="call_1", **arguments):
+    return ToolRequest(request_id, name, arguments)
 
 
 def says(text):
-    return response(text_block(text))
+    return LLMResponse("end_turn", text, (), content=f"model: {text}")
 
 
-def calls(*blocks):
-    return response(*blocks, stop_reason="tool_use")
+def calls(*requests):
+    return LLMResponse("tool_use", "", requests, content=f"model called {len(requests)} tools")
+
+
+def incomplete(text=""):
+    return LLMResponse("incomplete", text, (), content=None)
 
 
 class FakeLLM:
@@ -31,8 +29,8 @@ class FakeLLM:
         self.script = list(script)
         self.requests = []
 
-    def create_message(self, system, messages, tools):
-        self.requests.append(SimpleNamespace(system=system, messages=copy(messages), tools=tools))
+    def create_message(self, system, contents, tools):
+        self.requests.append(SimpleNamespace(system=system, contents=copy(contents), tools=tools))
         step = self.script.pop(0)
         if isinstance(step, Exception):
             raise step

@@ -6,7 +6,14 @@ from datetime import datetime
 from typing import Any
 
 from emporio_agent.config import Settings
-from emporio_agent.llm import AnthropicClient, LLMClient, LLMUnavailableError
+from emporio_agent.llm import (
+    GeminiClient,
+    LLMClient,
+    LLMUnavailableError,
+    ToolRequest,
+    tool_results_content,
+    user_content,
+)
 from emporio_agent.prompts import build_system
 from emporio_agent.store import load_store
 from emporio_agent.tools import Toolbox, ToolResult
@@ -41,60 +48,46 @@ class Agent:
         self._on_tool_call = on_tool_call
         self._system = build_system(now)
         self._tools = toolbox.definitions()
-        self._messages: list[dict[str, Any]] = []
+        self._contents: list[Any] = []
 
     def reply(self, user_message: str) -> str:
-        turn_start = len(self._messages)
-        self._messages.append({"role": "user", "content": user_message})
+        turn_start = len(self._contents)
+        self._contents.append(user_content(user_message))
 
         try:
             for _ in range(MAX_TOOL_ROUNDS):
-                response = self._llm.create_message(self._system, self._messages, self._tools)
+                response = self._llm.create_message(self._system, self._contents, self._tools)
 
                 if response.stop_reason == "tool_use":
-                    self._messages.append({"role": "assistant", "content": response.content})
-                    self._messages.append({"role": "user", "content": self._run_tools(response)})
+                    self._contents.append(response.content)
+                    self._contents.append(self._run_tools(response.tool_requests))
                     continue
 
-                text = self._text_of(response)
-                if response.stop_reason == "end_turn" and text:
-                    self._messages.append({"role": "assistant", "content": response.content})
-                    return text
+                if response.stop_reason == "end_turn" and response.text:
+                    self._contents.append(response.content)
+                    return response.text
                 break
         except LLMUnavailableError:
             pass
 
-        # Refusal, truncated answer or too many rounds: drop the unfinished turn, so a
+        # Blocked or truncated answer, or too many rounds: drop the unfinished turn, so a
         # half-built exchange cannot break the next request.
-        del self._messages[turn_start:]
+        del self._contents[turn_start:]
         return FALLBACK_REPLY
 
-    def _run_tools(self, response: Any) -> list[dict[str, Any]]:
+    def _run_tools(self, requests: tuple[ToolRequest, ...]) -> Any:
         results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
-            result = self._toolbox.execute(block.name, block.input)
+        for request in requests:
+            result = self._toolbox.execute(request.name, request.arguments)
             if self._on_tool_call:
-                self._on_tool_call(ToolCall(block.name, block.input, result))
-            results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result.content,
-                    "is_error": result.is_error,
-                }
-            )
-        return results
-
-    @staticmethod
-    def _text_of(response: Any) -> str:
-        return "".join(b.text for b in response.content if b.type == "text").strip()
+                self._on_tool_call(ToolCall(request.name, request.arguments, result))
+            results.append((request, result))
+        return tool_results_content(results)
 
 
 def build_agent(
     settings: Settings, on_tool_call: Callable[[ToolCall], None] | None = None
-) -> tuple[Agent, AnthropicClient]:
-    llm = AnthropicClient(settings.api_key, settings.model, settings.effort)
+) -> tuple[Agent, GeminiClient]:
+    llm = GeminiClient(settings.api_key, settings.model)
     toolbox = Toolbox(load_store(settings.data_dir), settings.now, settings.tickets_path)
     return Agent(llm, toolbox, settings.now(), on_tool_call), llm

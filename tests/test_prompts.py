@@ -9,7 +9,7 @@ NOW = datetime(2026, 3, 25, 10, 0)
 
 @pytest.fixture(scope="module")
 def static_text():
-    return build_system(NOW)[0]["text"]
+    return build_system(NOW)
 
 
 @pytest.mark.parametrize(
@@ -55,13 +55,11 @@ def test_tools_named_in_the_prompt_exist(static_text):
         assert name in static_text
 
 
-def test_only_the_static_block_is_cached():
-    static, clock = build_system(NOW)
-    assert static["cache_control"] == {"type": "ephemeral"}
-    assert "cache_control" not in clock
+def test_clock_comes_last_so_the_rest_stays_a_stable_prefix():
+    first, second = build_system(NOW), build_system(datetime(2026, 3, 28, 15, 30))
+    clock = "Agora é quarta-feira, 25/03/2026, 10:00 em Campo Grande/MS."
 
-
-def test_clock_is_outside_the_cached_text():
-    static, clock = build_system(NOW)
-    assert "25/03/2026" not in static["text"]
-    assert clock["text"] == "Agora é quarta-feira, 25/03/2026, 10:00 em Campo Grande/MS."
+    assert first.endswith(clock)
+    assert first.removesuffix(clock) == second.removesuffix(
+        "Agora é sábado, 28/03/2026, 15:30 em Campo Grande/MS."
+    )
