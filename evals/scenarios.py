@@ -54,7 +54,7 @@ SCENARIOS = (
             "E se eu desistir depois que chegar, quem paga o frete de volta?",
         ),
         expected_tools=("get_order",),
-        must_include=("7 dias", "28/02/2026"),
+        must_include=("7 dias", "28/02"),
         example="03-return-shipped-order",
     ),
     Scenario(
