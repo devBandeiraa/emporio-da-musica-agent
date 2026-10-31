@@ -3,9 +3,11 @@ from datetime import datetime
 
 import pytest
 
-from emporio_agent.agent import FALLBACK_REPLY, MAX_TOOL_ROUNDS, Agent
-from emporio_agent.llm import LLMAuthError, LLMUnavailableError
+from emporio_agent.agent import FALLBACK_REPLY, MAX_TOOL_ROUNDS, Agent, build_agent
+from emporio_agent.config import Settings
+from emporio_agent.llm import AnthropicClient, LLMAuthError, LLMUnavailableError
 from emporio_agent.tools import Toolbox
+from tests.conftest import DATA_DIR
 from tests.fakes import FakeLLM, calls, response, says, text_block, tool_block
 
 NOW = datetime(2026, 3, 25, 10, 0)
@@ -204,6 +206,20 @@ def test_api_outage_becomes_the_fallback_reply_and_recovers(toolbox):
 
     assert agent.reply("oi") == FALLBACK_REPLY
     assert agent.reply("oi de novo") == "Voltei."
+
+
+def test_build_agent_wires_the_real_components(tmp_path):
+    settings = Settings(
+        api_key="test",
+        reference_datetime=NOW,
+        data_dir=DATA_DIR,
+        tickets_path=tmp_path / "tickets.jsonl",
+    )
+
+    agent, llm = build_agent(settings)
+
+    assert isinstance(agent, Agent)
+    assert isinstance(llm, AnthropicClient)
 
 
 def test_rejected_api_key_is_not_hidden(toolbox):
