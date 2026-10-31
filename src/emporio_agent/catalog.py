@@ -71,6 +71,16 @@ def find_category(store: Store, text: str) -> Category | None:
     return None
 
 
+def empty_category_in(store: Store, query: str) -> Category | None:
+    """Return a category without products mentioned in the query, e.g. "saxofone alto"."""
+    stocked = {product.category_id for product in store.products.values()}
+    for token in normalize(query).split():
+        category = find_category(store, token)
+        if category and category.category_id not in stocked:
+            return category
+    return None
+
+
 def _spec_tokens(product: Product) -> set[str]:
     tokens: set[str] = set()
     for key, value in product.specs.items():
