@@ -1,4 +1,4 @@
-from emporio_agent import __version__
+from emporio_agent.cli import main
 
 if __name__ == "__main__":
-    print(f"emporio-agent {__version__}")
+    raise SystemExit(main())
