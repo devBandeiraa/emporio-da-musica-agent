@@ -152,20 +152,21 @@ def test_incomplete_response_becomes_the_fallback_reply(toolbox):
     assert make_agent(toolbox, llm).reply("oi") == FALLBACK_REPLY
 
 
-def test_failed_turn_leaves_history_clean(toolbox):
+def test_failed_turn_keeps_what_the_customer_said(toolbox):
     llm = FakeLLM(says("Oi!"), incomplete(), says("Tudo certo."))
     agent = make_agent(toolbox, llm)
 
     agent.reply("oi")
-    assert agent.reply("mensagem bloqueada") == FALLBACK_REPLY
-    assert agent.reply("vamos de novo") == "Tudo certo."
+    assert agent.reply("meu pedido é o 8") == FALLBACK_REPLY
+    assert agent.reply("conseguiu ver?") == "Tudo certo."
 
     contents = llm.requests[2].contents
-    assert len(contents) == 3
-    assert text_of(contents[-1]) == "vamos de novo"
+    assert len(contents) == 4
+    assert text_of(contents[2]) == "meu pedido é o 8"
+    assert text_of(contents[3]) == "conseguiu ver?"
 
 
-def test_failure_after_a_tool_call_drops_the_whole_turn(toolbox):
+def test_failure_after_a_tool_call_drops_the_partial_exchange(toolbox):
     llm = FakeLLM(
         calls(tool_request("get_product_details", product_id=95)),
         incomplete(),
@@ -175,7 +176,7 @@ def test_failure_after_a_tool_call_drops_the_whole_turn(toolbox):
 
     assert agent.reply("oi") == FALLBACK_REPLY
     assert agent.reply("de novo") == "Agora foi."
-    assert [text_of(content) for content in llm.requests[2].contents] == ["de novo"]
+    assert [text_of(content) for content in llm.requests[2].contents] == ["oi", "de novo"]
 
 
 def test_empty_answer_becomes_the_fallback_reply(toolbox):
