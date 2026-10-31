@@ -21,6 +21,7 @@ htmlcov/
 
 # Runtime output (may contain personal data from support tickets)
 runtime/
+eval-results/
 
 # Original challenge material; the files the agent uses live in data/
 Desafio Técnico AI Engineer 2026/
