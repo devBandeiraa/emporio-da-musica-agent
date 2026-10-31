@@ -1,93 +1,237 @@
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import anthropic
+import httpx
 import pytest
+from google.genai import errors, types
 
 from emporio_agent.llm import (
-    SERVER_FALLBACK_BETA,
-    AnthropicClient,
+    MAX_ATTEMPTS,
+    GeminiClient,
     LLMAuthError,
     LLMUnavailableError,
+    ToolRequest,
+    tool_results_content,
+    user_content,
 )
+from emporio_agent.tools import ToolResult
 
-SYSTEM = [{"type": "text", "text": "sistema"}]
-MESSAGES = [{"role": "user", "content": "oi"}]
-TOOLS = [{"name": "t", "description": "d", "input_schema": {"type": "object"}}]
+SYSTEM = "sistema"
+CONTENTS = [user_content("oi")]
+TOOLS = [
+    {
+        "name": "search_products",
+        "description": "Busca produtos.",
+        "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}},
+    }
+]
 
 
-def client_with(create, model="claude-opus-5-5"):
-    client = AnthropicClient(api_key="test", model=model, effort="low")
+def api_response(*parts, finish_reason=types.FinishReason.STOP, usage=None):
+    candidate = types.Candidate(
+        content=types.Content(role="model", parts=list(parts)), finish_reason=finish_reason
+    )
+    return types.GenerateContentResponse(candidates=[candidate], usage_metadata=usage)
+
+
+def text_part(text, **kwargs):
+    return types.Part(text=text, **kwargs)
+
+
+def call_part(name="search_products", call_id="call_1", **arguments):
+    return types.Part(function_call=types.FunctionCall(id=call_id, name=name, args=arguments))
+
+
+def client_with(generate):
+    client = GeminiClient(api_key="test", model="gemini-test")
     client._client = MagicMock()
-    client._client.beta.messages.create = create
+    client._client.models.generate_content = generate
     return client
 
 
-def api_response():
-    return SimpleNamespace(
-        usage=SimpleNamespace(
-            input_tokens=10,
-            output_tokens=5,
-            cache_read_input_tokens=100,
-            cache_creation_input_tokens=None,
-        )
+def create_with(raw):
+    return client_with(MagicMock(return_value=raw)).create_message(SYSTEM, CONTENTS, TOOLS)
+
+
+def test_sends_model_system_contents_and_tools():
+    generate = MagicMock(return_value=api_response(text_part("oi")))
+
+    client_with(generate).create_message(SYSTEM, CONTENTS, TOOLS)
+
+    arguments = generate.call_args.kwargs
+    assert arguments["model"] == "gemini-test"
+    assert arguments["contents"] is CONTENTS
+    config = arguments["config"]
+    assert config.system_instruction == SYSTEM
+    declaration = config.tools[0].function_declarations[0]
+    assert declaration.name == "search_products"
+    assert declaration.parameters_json_schema == TOOLS[0]["input_schema"]
+
+
+def test_the_agent_loop_runs_the_tools_not_the_sdk():
+    generate = MagicMock(return_value=api_response(text_part("oi")))
+    client_with(generate).create_message(SYSTEM, CONTENTS, TOOLS)
+    assert generate.call_args.kwargs["config"].automatic_function_calling.disable is True
+
+
+def test_text_answer():
+    response = create_with(api_response(text_part("  Olá! ")))
+    assert response.stop_reason == "end_turn"
+    assert response.text == "Olá!"
+    assert response.tool_requests == ()
+
+
+def test_function_call_becomes_a_tool_request():
+    response = create_with(api_response(call_part(query="Takamine")))
+    assert response.stop_reason == "tool_use"
+    assert response.tool_requests == (
+        ToolRequest("call_1", "search_products", {"query": "Takamine"}),
     )
 
 
-def sent_arguments(model):
-    create = MagicMock(return_value=api_response())
-    client_with(create, model).create_message(SYSTEM, MESSAGES, TOOLS)
-    return create.call_args.kwargs
+def test_thought_parts_never_reach_the_customer():
+    response = create_with(api_response(text_part("raciocínio", thought=True), text_part("Oi!")))
+    assert response.text == "Oi!"
 
 
-def test_sends_model_effort_cache_and_content():
-    arguments = sent_arguments("claude-opus-5-5")
-    assert arguments["model"] == "claude-opus-5-5"
-    assert arguments["output_config"] == {"effort": "low"}
-    assert arguments["cache_control"] == {"type": "ephemeral"}
-    assert arguments["system"] is SYSTEM
-    assert arguments["messages"] is MESSAGES
-    assert arguments["tools"] is TOOLS
+def test_model_turn_is_kept_with_its_thought_signature():
+    part = call_part(query="x")
+    part.thought_signature = b"signature"
 
+    response = create_with(api_response(part))
 
-def test_never_sends_sampling_parameters():
-    assert not {"temperature", "top_p", "top_k"} & sent_arguments("claude-opus-5-5").keys()
-
-
-@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-sonnet-5-5"])
-def test_enables_server_fallback_where_supported(model):
-    arguments = sent_arguments(model)
-    assert arguments["fallbacks"] == "default"
-    assert arguments["betas"] == [SERVER_FALLBACK_BETA]
-
-
-def test_skips_server_fallback_elsewhere():
-    arguments = sent_arguments("claude-haiku-5-5")
-    assert "fallbacks" not in arguments
-    assert "betas" not in arguments
-
-
-def test_accumulates_usage():
-    client = client_with(MagicMock(return_value=api_response()))
-    client.create_message(SYSTEM, MESSAGES, TOOLS)
-    client.create_message(SYSTEM, MESSAGES, TOOLS)
-
-    assert client.usage["input_tokens"] == 20
-    assert client.usage["output_tokens"] == 10
-    assert client.usage["cache_read_input_tokens"] == 200
-    assert client.usage["cache_creation_input_tokens"] == 0
+    assert response.content.parts[0].thought_signature == b"signature"
 
 
 @pytest.mark.parametrize(
-    "error_type", [anthropic.AuthenticationError, anthropic.PermissionDeniedError]
+    "finish_reason",
+    [
+        types.FinishReason.MAX_TOKENS,
+        types.FinishReason.SAFETY,
+        types.FinishReason.MALFORMED_FUNCTION_CALL,
+    ],
 )
-def test_rejected_credentials_raise_auth_error(error_type):
-    error = error_type("denied", response=MagicMock(), body=None)
-    with pytest.raises(LLMAuthError):
-        client_with(MagicMock(side_effect=error)).create_message(SYSTEM, MESSAGES, TOOLS)
+def test_unfinished_answers_are_incomplete(finish_reason):
+    response = create_with(api_response(text_part("Meia"), finish_reason=finish_reason))
+    assert response.stop_reason == "incomplete"
 
 
-def test_other_api_errors_raise_unavailable():
-    error = anthropic.APIConnectionError(request=MagicMock())
+def test_blocked_prompt_with_no_candidates_is_incomplete():
+    assert create_with(types.GenerateContentResponse()).stop_reason == "incomplete"
+
+
+def test_empty_candidate_is_an_empty_answer():
+    raw = types.GenerateContentResponse(
+        candidates=[types.Candidate(finish_reason=types.FinishReason.STOP)]
+    )
+    response = create_with(raw)
+    assert response.stop_reason == "end_turn"
+    assert response.text == ""
+
+
+def test_tool_results_go_back_in_one_turn():
+    success = ToolRequest("a", "search_products", {})
+    failure = ToolRequest("b", "get_order", {})
+
+    content = tool_results_content(
+        [(success, ToolResult('{"total": 1}')), (failure, ToolResult('{"error": "x"}', True))]
+    )
+
+    first, second = [part.function_response for part in content.parts]
+    assert content.role == "user"
+    assert (first.id, first.name, first.response) == (
+        "a",
+        "search_products",
+        {"output": {"total": 1}},
+    )
+    assert second.response == {"error": {"error": "x"}}
+
+
+def test_accumulates_usage():
+    usage = types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=100,
+        candidates_token_count=20,
+        thoughts_token_count=5,
+        cached_content_token_count=80,
+    )
+    client = client_with(MagicMock(return_value=api_response(text_part("oi"), usage=usage)))
+
+    client.create_message(SYSTEM, CONTENTS, TOOLS)
+    client.create_message(SYSTEM, CONTENTS, TOOLS)
+
+    assert client.usage == {
+        "prompt_tokens": 200,
+        "output_tokens": 40,
+        "thinking_tokens": 10,
+        "cached_tokens": 160,
+        "requests": 2,
+    }
+
+
+def api_error(error_type, code, message):
+    return error_type(code, {"error": {"code": code, "message": message, "status": "ERROR"}})
+
+
+@pytest.fixture
+def waits(monkeypatch):
+    delays = []
+    monkeypatch.setattr("emporio_agent.llm.time.sleep", delays.append)
+    return delays
+
+
+def test_retries_rate_limits_and_overload_then_succeeds(waits):
+    generate = MagicMock(
+        side_effect=[
+            api_error(errors.ClientError, 429, "Quota exceeded"),
+            api_error(errors.ServerError, 503, "High demand"),
+            api_response(text_part("Oi!")),
+        ]
+    )
+
+    response = client_with(generate).create_message(SYSTEM, CONTENTS, TOOLS)
+
+    assert response.text == "Oi!"
+    assert generate.call_count == 3
+    assert waits == [2, 4]
+
+
+def test_gives_up_after_the_last_attempt(waits):
+    error = api_error(errors.ServerError, 503, "High demand")
+    generate = MagicMock(side_effect=error)
+
     with pytest.raises(LLMUnavailableError):
-        client_with(MagicMock(side_effect=error)).create_message(SYSTEM, MESSAGES, TOOLS)
+        client_with(generate).create_message(SYSTEM, CONTENTS, TOOLS)
+
+    assert generate.call_count == MAX_ATTEMPTS
+    assert len(waits) == MAX_ATTEMPTS - 1
+
+
+def test_permanent_errors_are_not_retried(waits):
+    generate = MagicMock(side_effect=api_error(errors.ClientError, 403, "No permission"))
+
+    with pytest.raises(LLMAuthError):
+        client_with(generate).create_message(SYSTEM, CONTENTS, TOOLS)
+
+    assert generate.call_count == 1
+    assert waits == []
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        (403, "The caller does not have permission"),
+        (400, "API key not valid. Please pass a valid API key."),
+    ],
+)
+def test_rejected_credentials_raise_auth_error(code, message):
+    error = api_error(errors.ClientError, code, message)
+    with pytest.raises(LLMAuthError):
+        client_with(MagicMock(side_effect=error)).create_message(SYSTEM, CONTENTS, TOOLS)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [api_error(errors.ClientError, 400, "Bad request"), httpx.ConnectError("no network")],
+)
+def test_other_failures_raise_unavailable(error):
+    with pytest.raises(LLMUnavailableError):
+        client_with(MagicMock(side_effect=error)).create_message(SYSTEM, CONTENTS, TOOLS)

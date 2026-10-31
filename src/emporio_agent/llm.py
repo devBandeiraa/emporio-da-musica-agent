@@ -1,16 +1,24 @@
-"""Thin wrapper over the Anthropic SDK, so the agent loop can run on a fake client in tests."""
+"""Thin wrapper over the Gemini SDK, so the agent loop can run on a fake client in tests."""
 
+import json
+import time
 from collections import Counter
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
-import anthropic
+import httpx
+from google import genai
+from google.genai import errors, types
 
-MAX_OUTPUT_TOKENS = 16000
+from emporio_agent.tools import ToolResult
 
-# Declined requests are retried server-side on these models. Others, like Haiku, have no
-# fallback, and the agent loop handles the refusal either way.
-SERVER_FALLBACK_MODELS = frozenset({"claude-opus-5-5", "claude-sonnet-5-5"})
-SERVER_FALLBACK_BETA = "server-side-fallback-2026-07-01"
+MAX_OUTPUT_TOKENS = 8192
+REQUEST_TIMEOUT_MS = 60_000
+MAX_ATTEMPTS = 5
+FIRST_RETRY_DELAY_SECONDS = 2
+RETRIABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+StopReason = Literal["end_turn", "tool_use", "incomplete"]
 
 
 class LLMUnavailableError(Exception):
@@ -21,51 +29,125 @@ class LLMAuthError(Exception):
     """The API key was rejected. Retrying will not help."""
 
 
+@dataclass(frozen=True)
+class ToolRequest:
+    id: str | None
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LLMResponse:
+    stop_reason: StopReason
+    text: str
+    tool_requests: tuple[ToolRequest, ...]
+    # The model's turn, replayed unchanged: Gemini ties thought signatures to it.
+    content: Any
+
+
 class LLMClient(Protocol):
     def create_message(
-        self,
-        system: list[dict[str, Any]],
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-    ) -> Any: ...
+        self, system: str, contents: list[Any], tools: list[dict[str, Any]]
+    ) -> LLMResponse: ...
 
 
-class AnthropicClient:
-    def __init__(self, api_key: str, model: str, effort: str) -> None:
-        self._client = anthropic.Anthropic(api_key=api_key)
+def user_content(text: str) -> types.Content:
+    return types.Content(role="user", parts=[types.Part(text=text)])
+
+
+def tool_results_content(results: list[tuple[ToolRequest, ToolResult]]) -> types.Content:
+    """All results of a round go back in one turn, in the order they were requested."""
+    parts = []
+    for request, result in results:
+        key = "error" if result.is_error else "output"
+        response = types.FunctionResponse(
+            id=request.id, name=request.name, response={key: json.loads(result.content)}
+        )
+        parts.append(types.Part(function_response=response))
+    return types.Content(role="user", parts=parts)
+
+
+def _parse_response(raw: types.GenerateContentResponse) -> LLMResponse:
+    candidate = raw.candidates[0] if raw.candidates else None
+    content = candidate.content if candidate else None
+    parts = (content.parts if content else None) or []
+
+    requests = tuple(
+        ToolRequest(part.function_call.id, part.function_call.name, dict(part.function_call.args))
+        for part in parts
+        if part.function_call and part.function_call.name
+    )
+    text = "".join(part.text for part in parts if part.text and not part.thought).strip()
+
+    if candidate is None or candidate.finish_reason != types.FinishReason.STOP:
+        return LLMResponse("incomplete", text, requests, content)
+    return LLMResponse("tool_use" if requests else "end_turn", text, requests, content)
+
+
+def _is_auth_failure(error: errors.ClientError) -> bool:
+    return error.code in (401, 403) or "api key" in str(error.message).casefold()
+
+
+class GeminiClient:
+    def __init__(self, api_key: str, model: str) -> None:
+        # The SDK's retry_options is avoided on purpose: with it, valid requests intermittently
+        # came back as 403 PERMISSION_DENIED, which never happened without it.
+        options = types.HttpOptions(timeout=REQUEST_TIMEOUT_MS)
+        self._client = genai.Client(api_key=api_key, http_options=options)
         self._model = model
-        self._effort = effort
         self.usage: Counter[str] = Counter()
 
-    def _fallback_options(self) -> dict[str, Any]:
-        if self._model in SERVER_FALLBACK_MODELS:
-            return {"betas": [SERVER_FALLBACK_BETA], "fallbacks": "default"}
-        return {}
+    def _config(self, system: str, tools: list[dict[str, Any]]) -> types.GenerateContentConfig:
+        declarations = [
+            types.FunctionDeclaration(
+                name=tool["name"],
+                description=tool["description"],
+                parameters_json_schema=tool["input_schema"],
+            )
+            for tool in tools
+        ]
+        return types.GenerateContentConfig(
+            system_instruction=system,
+            tools=[types.Tool(function_declarations=declarations)],
+            # The agent loop runs the tools itself, with its own limits.
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            max_output_tokens=MAX_OUTPUT_TOKENS,
+        )
+
+    def _record_usage(self, raw: types.GenerateContentResponse) -> None:
+        usage = raw.usage_metadata
+        if usage:
+            self.usage["prompt_tokens"] += usage.prompt_token_count or 0
+            self.usage["output_tokens"] += usage.candidates_token_count or 0
+            self.usage["thinking_tokens"] += usage.thoughts_token_count or 0
+            self.usage["cached_tokens"] += usage.cached_content_token_count or 0
+        self.usage["requests"] += 1
+
+    def _generate(
+        self, contents: list[Any], config: types.GenerateContentConfig
+    ) -> types.GenerateContentResponse:
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                return self._client.models.generate_content(
+                    model=self._model, contents=contents, config=config
+                )
+            except errors.APIError as error:
+                if error.code not in RETRIABLE_STATUS_CODES or attempt == MAX_ATTEMPTS - 1:
+                    raise
+                time.sleep(FIRST_RETRY_DELAY_SECONDS * 2**attempt)
+        raise AssertionError("unreachable: the last attempt returns or raises")
 
     def create_message(
-        self,
-        system: list[dict[str, Any]],
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-    ) -> Any:
+        self, system: str, contents: list[Any], tools: list[dict[str, Any]]
+    ) -> LLMResponse:
         try:
-            response = self._client.beta.messages.create(
-                model=self._model,
-                max_tokens=MAX_OUTPUT_TOKENS,
-                output_config={"effort": self._effort},
-                cache_control={"type": "ephemeral"},
-                system=system,
-                messages=messages,
-                tools=tools,
-                **self._fallback_options(),
-            )
-        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as error:
-            raise LLMAuthError(str(error)) from error
-        except anthropic.APIError as error:
+            raw = self._generate(contents, self._config(system, tools))
+        except errors.ClientError as error:
+            if _is_auth_failure(error):
+                raise LLMAuthError(str(error)) from error
+            raise LLMUnavailableError(str(error)) from error
+        except (errors.ServerError, httpx.TransportError) as error:
             raise LLMUnavailableError(str(error)) from error
 
-        self.usage["input_tokens"] += response.usage.input_tokens
-        self.usage["output_tokens"] += response.usage.output_tokens
-        self.usage["cache_read_input_tokens"] += response.usage.cache_read_input_tokens or 0
-        self.usage["cache_creation_input_tokens"] += response.usage.cache_creation_input_tokens or 0
-        return response
+        self._record_usage(raw)
+        return _parse_response(raw)
