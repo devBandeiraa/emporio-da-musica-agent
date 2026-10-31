@@ -34,14 +34,16 @@ DEFAULT_RESULTS = 20
 
 ORDER_NOT_VERIFIED = (
     "Não foi possível confirmar esse pedido com o contato informado. "
-    "Peça para o cliente conferir o número do pedido e o e-mail ou telefone da compra."
+    "Peça para o cliente conferir o número do pedido e o e-mail ou telefone da compra. "
+    "Não trate o cliente pelo nome: nada foi confirmado."
 )
 ORDER_LOCKED = (
     "Limite de tentativas atingido nesta conversa. Não tente de novo: "
     "encaminhe o cliente para atendimento humano."
 )
 RECEIPT_ASSUMPTION = (
-    "A data de recebimento não é registrada; a previsão de entrega foi usada como aproximação."
+    "Avise o cliente: os prazos foram calculados pela previsão de entrega, "
+    "porque a data real de recebimento não é registrada."
 )
 WINDOWS_NOT_STARTED = "O pedido ainda não consta como entregue; os prazos contam do recebimento."
 
@@ -54,9 +56,9 @@ ORDER_STATUS_LABELS = {
 }
 PAYMENT_LABELS = {"pix": "PIX", "debit": "cartão de débito", "boleto": "boleto bancário"}
 AVAILABILITY_GUIDANCE = {
-    "out_of_stock": "Temporariamente indisponível: ofereça as alternativas.",
-    "discontinued": "Não faz mais parte do catálogo: ofereça as alternativas.",
-    "coming_soon": "Em breve, sem data: não confirme disponibilidade nem preço.",
+    "out_of_stock": "Temporariamente indisponível: diga isso e ofereça as alternativas.",
+    "discontinued": "Não faz mais parte do catálogo: diga isso e ofereça as alternativas.",
+    "coming_soon": "Em breve, sem data: não confirme preço nem prometa aviso. Dê alternativas.",
 }
 
 
@@ -131,9 +133,24 @@ def _availability(product: Product) -> str:
     return "available" if product.is_available else "out_of_stock"
 
 
+def _payment_summary(pricing: Pricing) -> str:
+    """A ready sentence: left to combine fields, the model called the card price a PIX price."""
+    final = format_brl(pricing.final_price)
+    installments = (
+        f"em até {pricing.installments}x sem juros de "
+        f"{format_brl(pricing.installment_value)} no cartão"
+    )
+    if pricing.pix_price is None:
+        return f"{final} em qualquer forma de pagamento, inclusive PIX, ou {installments}."
+    return (
+        f"{format_brl(pricing.pix_price)} no PIX, {final} no débito ou boleto, ou {installments}."
+    )
+
+
 def _pricing_payload(pricing: Pricing) -> dict[str, Any]:
     promotion = pricing.promotion
     return {
+        "payment_summary": _payment_summary(pricing),
         "list_price": format_brl(pricing.list_price),
         "promotion": promotion
         and {"name": promotion.description, "discount_percent": promotion.discount_percent},
@@ -254,6 +271,7 @@ class Toolbox:
             "name": product.name,
             "availability": availability,
             "guidance": AVAILABILITY_GUIDANCE[availability],
+            "alternatives": self._alternatives(product),
         }
 
     def _stocked_categories(self) -> list[str]:

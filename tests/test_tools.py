@@ -66,6 +66,7 @@ class TestSearchProducts:
         assert payload["results"] == []
         assert payload["not_available"][0]["product_id"] == product_id
         assert payload["not_available"][0]["availability"] == availability
+        assert payload["not_available"][0]["alternatives"]
 
     @pytest.mark.parametrize("query", ["saxofone", "saxofone alto", "flauta", "violino"])
     def test_query_for_empty_category_says_so(self, toolbox, query):
@@ -112,6 +113,20 @@ class TestProductDetails:
         assert pricing["final_price"] == "R$ 5.519,08"
         assert pricing["pix_price"] is None
         assert "não acumula" in pricing["pix_note"]
+
+    def test_payment_summary_separates_pix_from_other_methods(self, toolbox):
+        pricing = call(toolbox, "get_product_details", product_id=91)["pricing"]
+        assert pricing["payment_summary"] == (
+            "R$ 854,05 no PIX, R$ 899,00 no débito ou boleto, "
+            "ou em até 8x sem juros de R$ 112,38 no cartão."
+        )
+
+    def test_payment_summary_with_a_promotion_has_a_single_price(self, toolbox):
+        pricing = call(toolbox, "get_product_details", product_id=94)["pricing"]
+        assert pricing["payment_summary"] == (
+            "R$ 5.519,08 em qualquer forma de pagamento, inclusive PIX, "
+            "ou em até 12x sem juros de R$ 459,92 no cartão."
+        )
 
     def test_no_promotion_offers_pix(self, toolbox):
         pricing = call(toolbox, "get_product_details", product_id=95)["pricing"]
@@ -177,7 +192,7 @@ class TestGetOrder:
         assert windows["withdrawal_7_days"] == {"deadline": "24/02/2026", "open": False}
         assert windows["defect_exchange_30_days"]["open"] is False
         assert windows["legal_warranty_90_days"] == {"deadline": "18/05/2026", "open": True}
-        assert "aproximação" in windows["assumption"]
+        assert "previsão de entrega" in windows["assumption"]
 
     @pytest.mark.parametrize(
         ("order_id", "contact", "total"),
