@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+.env
+.env.*
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.coverage
+runtime
+tests
+examples
+Desafio Técnico AI Engineer 2026
