@@ -6,8 +6,9 @@ import pytest
 from evals.runner import Transcript, check, render_markdown
 from evals.scenarios import SCENARIOS, Scenario
 
-from emporio_agent.agent import ToolCall
+from emporio_agent.agent import FALLBACK_REPLY, ToolCall
 from emporio_agent.config import Settings
+from emporio_agent.text import normalize
 from emporio_agent.tools import ToolResult
 
 TOOL_NAMES = {"search_products", "get_product_details", "get_order", "register_ticket"}
@@ -24,6 +25,13 @@ def tool_call(name, payload):
 def test_scenario_names_are_unique():
     names = [scenario.name for scenario in SCENARIOS]
     assert len(names) == len(set(names))
+
+
+def test_scenario_texts_survive_normalization():
+    # "R$" alone normalizes to "r", which would match almost any reply.
+    for scenario in SCENARIOS:
+        for text in scenario.must_not_include:
+            assert len(normalize(text)) > 1, text
 
 
 def test_scenarios_only_name_real_tools():
@@ -66,6 +74,12 @@ def test_invented_price_fails():
     scenario = Scenario("s", "t", ("oi",))
     failures = check(transcript_of(scenario, "Custa R$ 1.999,00"), manual="")
     assert failures == ["price not backed by any source: 1999.00"]
+
+
+def test_fallback_reply_fails_the_scenario():
+    scenario = Scenario("s", "t", ("oi",))
+    failures = check(transcript_of(scenario, FALLBACK_REPLY), manual=FALLBACK_REPLY)
+    assert failures == ["agent fell back: the model gave no usable answer"]
 
 
 def test_prices_are_compared_by_value():

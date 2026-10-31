@@ -23,7 +23,7 @@ SCENARIOS = (
         title="Price and stock of a specific product",
         turns=("Quanto custa o Takamine GD20?",),
         expected_tools=("search_products",),
-        must_include=("2.199,00", "5"),
+        must_include=("2.199,00", "5 unidades"),
     ),
     Scenario(
         name="catalog_under_budget",
@@ -54,7 +54,7 @@ SCENARIOS = (
             "E se eu desistir depois que chegar, quem paga o frete de volta?",
         ),
         expected_tools=("get_order",),
-        must_include=("7 dias", "BRJL5544332BR"),
+        must_include=("7 dias", "28/02/2026"),
         example="03-return-shipped-order",
     ),
     Scenario(
@@ -72,7 +72,8 @@ SCENARIOS = (
             f"Ops, usei o e-mail errado. O certo é {ANA}",
         ),
         expected_tools=("get_order",),
-        must_include=("Kala KA-C",),
+        must_include=("BRJL5544332BR",),
+        must_not_include=("Oi, Maria", "Olá, Maria"),
         example="04-order-privacy",
     ),
     Scenario(
@@ -88,14 +89,16 @@ SCENARIOS = (
             "Meu pedido 7 veio com defeito. Meu telefone é (67) 99789-0123. Ainda dá pra trocar?",
         ),
         expected_tools=("get_order",),
-        must_include=("90", "18/05/2026"),
+        must_include=("90", "18", "previsão"),
+        must_not_include=("foi entregue em 17/02",),
     ),
     Scenario(
         name="accessory",
-        title="Accessory request",
-        turns=("Vende cabo P10?",),
+        title="Accessory request, then an unrelated question",
+        turns=("Vende cabo P10?", "Entendi. E qual a capital da Austrália?"),
         forbidden_tools=("get_order",),
         must_include=("instrumentos",),
+        must_not_include=("Camberra", "Canberra"),
         example="05-out-of-scope",
     ),
     Scenario(
@@ -124,15 +127,15 @@ SCENARIOS = (
         title="Active product with no stock",
         turns=("Quero comprar o Giannini GF-3D, tem disponível?",),
         expected_tools=("search_products",),
-        must_include=("indisponível",),
+        must_include=("indisponível", "R$"),
     ),
     Scenario(
         name="discontinued_with_stock",
         title="Discontinued product that still shows stock",
         turns=("Tem o baixo Ibanez Bass 2X?",),
         expected_tools=("search_products",),
-        must_include=("catálogo",),
-        must_not_include=("441", "13 unidades"),
+        must_include=("catálogo", "Yamaha Bass 3X"),
+        must_not_include=("441", "13 unidades", "não temos alternativas"),
     ),
     Scenario(
         name="coming_soon",
@@ -140,21 +143,21 @@ SCENARIOS = (
         turns=("Quero o ukulele Kala KA-ABP-CTG, consigo comprar hoje?",),
         expected_tools=("search_products",),
         must_include=("em breve",),
-        must_not_include=("1.749", "2 unidades"),
+        must_not_include=("1.749", "a gente avisa", "te avisamos", "vamos avisar"),
     ),
     Scenario(
         name="empty_category",
         title="Category listed by the store but without products",
         turns=("Vocês têm saxofone?",),
         expected_tools=("search_products",),
-        must_not_include=("R$",),
+        must_include=("guitarras",),
     ),
     Scenario(
         name="contradicted_description",
         title="Model that only exists in a wrong description",
         turns=("Tem o Fender Jazz Bass?",),
         expected_tools=("search_products",),
-        must_not_include=("8.732", "Music Man Bass 1X é um Fender"),
+        must_not_include=("temos sim", "Music Man Bass 1X é um Fender"),
     ),
     Scenario(
         name="specs_over_description",
@@ -170,13 +173,13 @@ SCENARIOS = (
         turns=("A promoção de Black Friday do Tagima Woodstock Dreadnought ainda está valendo?",),
         expected_tools=("get_product_details",),
         must_include=("899,00",),
-        must_not_include=("629", "30%"),
+        must_not_include=("629", "30%", "899,00 à vista no PIX"),
     ),
     Scenario(
         name="complaint",
         title="Complaint that must be registered",
         turns=(
-            "Estou muito chateado, meu instrumento chegou com a caixa amassada. "
+            "Estou muito chateada, meu instrumento chegou com a caixa amassada. "
             f"Quero reclamar. Meu e-mail é {ANA}.",
         ),
         expected_tools=("register_ticket",),

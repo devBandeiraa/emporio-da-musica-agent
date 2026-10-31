@@ -7,13 +7,14 @@ import argparse
 import json
 import re
 import sys
+import time
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from emporio_agent.agent import ToolCall, build_agent
+from emporio_agent.agent import FALLBACK_REPLY, ToolCall, build_agent
 from emporio_agent.config import ConfigError, Settings, load_settings
 from emporio_agent.prompts import build_system
 from emporio_agent.text import normalize
@@ -56,6 +57,8 @@ def check(transcript: Transcript, manual: str) -> list[str]:
     replies = normalize(transcript.replies)
     failures = []
 
+    if FALLBACK_REPLY in transcript.replies:
+        failures.append("agent fell back: the model gave no usable answer")
     for tool in scenario.expected_tools:
         if tool not in transcript.tools_used:
             failures.append(f"expected tool not called: {tool}")
@@ -113,6 +116,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("eval-results"))
     parser.add_argument("--write-examples", action="store_true")
     parser.add_argument("--only", nargs="*", help="scenario names to run")
+    parser.add_argument("--pause", type=float, default=2, help="seconds between scenarios")
     args = parser.parse_args()
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8")
@@ -124,7 +128,7 @@ def main() -> int:
         return 2
 
     settings = replace(settings, tickets_path=args.output_dir / "tickets.jsonl")
-    manual = build_system(settings.now())[0]["text"]
+    manual = build_system(settings.now())
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     selected = [s for s in SCENARIOS if not args.only or s.name in args.only]
@@ -132,13 +136,23 @@ def main() -> int:
     usage: Counter[str] = Counter()
 
     for scenario in selected:
+        started = time.monotonic()
         transcript, scenario_usage = run_scenario(scenario, settings)
+        seconds = round(time.monotonic() - started, 1)
         usage.update(scenario_usage)
         failures = check(transcript, manual)
-        results.append({"name": scenario.name, "passed": not failures, "failures": failures})
-        print(f"[{'PASS' if not failures else 'FAIL'}] {scenario.name}")
+        results.append(
+            {
+                "name": scenario.name,
+                "passed": not failures,
+                "seconds": seconds,
+                "failures": failures,
+            }
+        )
+        print(f"[{'PASS' if not failures else 'FAIL'}] {scenario.name} ({seconds}s)")
         for failure in failures:
             print(f"       {failure}")
+        time.sleep(args.pause)
 
         markdown = render_markdown(transcript, settings)
         (args.output_dir / f"{scenario.name}.md").write_text(markdown, encoding="utf-8")
@@ -149,7 +163,6 @@ def main() -> int:
     passed = sum(result["passed"] for result in results)
     report = {
         "model": settings.model,
-        "effort": settings.effort,
         "passed": passed,
         "total": len(results),
         "usage": usage,

@@ -5,10 +5,7 @@ on:
     inputs:
       model:
         description: Model to evaluate
-        default: claude-opus-5-5
-      effort:
-        description: Reasoning effort
-        default: low
+        default: gemini-3.5-flash-lite
 
 permissions:
   contents: read
@@ -17,9 +14,8 @@ jobs:
   evaluate:
     runs-on: ubuntu-latest
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       LLM_MODEL: ${{ inputs.model }}
-      LLM_EFFORT: ${{ inputs.effort }}
       REFERENCE_DATETIME: "2026-03-25T10:00:00"
     steps:
       - uses: actions/checkout@v7
