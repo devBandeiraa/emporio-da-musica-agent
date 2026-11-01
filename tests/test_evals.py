@@ -124,6 +124,17 @@ def test_scenario_can_set_its_own_clock(monkeypatch):
     assert seen["now"] == datetime(2026, 3, 22, 15, 0)
 
 
+def test_markdown_shows_the_store_date_of_the_scenario():
+    scenario = Scenario("s", "Título", ("oi",), now="2026-03-22T15:00:00")
+
+    text = render_markdown(
+        transcript_of(scenario, "Olá!"),
+        Settings(api_key="k", reference_datetime=datetime(2026, 3, 25, 10)),
+    )
+
+    assert "Store date: 2026-03-22 15:00." in text
+
+
 def test_markdown_keeps_each_turn_with_its_tools():
     scenario = Scenario("s", "Título", ("oi",))
     call = ToolCall("get_order", {"order_id": 8}, ToolResult("{}"))
