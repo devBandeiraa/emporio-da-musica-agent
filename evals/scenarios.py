@@ -33,11 +33,12 @@ SCENARIOS = (
             "Quais opções de violões disponíveis custando até R$1000?",
             "Desses, qual você indicaria para quem está começando?",
         ),
-        expected_tools=("search_products",),
+        expected_tools=("search_products", "get_product_details"),
         must_include=("Yamaha C40", "Tagima Memphis"),
         must_not_include=(
             "GF-3D",
             "SN-7C",
+            "não fazemos",
             "professor",
             "queridinh",
             "tradiciona",

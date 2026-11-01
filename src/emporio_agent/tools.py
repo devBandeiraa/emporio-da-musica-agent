@@ -383,7 +383,7 @@ class Toolbox:
             "order_id": order.order_id,
             "customer_first_name": first_name,
             "status": ORDER_STATUS_LABELS[order.status],
-            "order_date": _format_date(order.order_date),
+            "purchased_on": _format_date(order.order_date),
             "items": [
                 {"name": self._store.products[i.product_id].name, "quantity": i.quantity}
                 for i in order.items
