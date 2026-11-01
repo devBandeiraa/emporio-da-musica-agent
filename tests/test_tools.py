@@ -178,6 +178,7 @@ class TestGetOrder:
         assert payload["items"] == [{"name": "Kala KA-C Concert Mogno", "quantity": 1}]
         assert payload["payment"] == "cartão de débito"
         assert payload["tracking_code"] == "BRJL5544332BR"
+        assert "rastreio" in payload["tracking_guidance"]
         assert payload["days_past_estimate"] == 25
         assert payload["return_windows"]["started"] is False
 
@@ -223,6 +224,7 @@ class TestGetOrder:
         payload = call(toolbox, "get_order", order_id=13, contact="fernanda.ribeiro@coldmail.com")
         assert payload["status"] == "pendente"
         assert payload["tracking_code"] is None
+        assert "tracking_guidance" not in payload
         assert "return_windows" not in payload
 
     def test_shared_email_only_opens_the_order_it_belongs_to(self, toolbox):

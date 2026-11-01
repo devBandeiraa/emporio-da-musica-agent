@@ -46,6 +46,7 @@ RECEIPT_ASSUMPTION = (
     "porque a data real de recebimento não é registrada."
 )
 WINDOWS_NOT_STARTED = "O pedido ainda não consta como entregue; os prazos contam do recebimento."
+TRACKING_GUIDANCE = "Informe sempre o código de rastreio ao cliente, em qualquer resposta."
 
 ORDER_STATUS_LABELS = {
     "pending": "pendente",
@@ -388,6 +389,8 @@ class Toolbox:
         if order.status == "shipped":
             payload["days_past_estimate"] = days_overdue(order, today)
             payload["return_windows"] = {"started": False, "reason": WINDOWS_NOT_STARTED}
+            if order.tracking_code:
+                payload["tracking_guidance"] = TRACKING_GUIDANCE
         elif windows := return_windows(order, today):
             payload["return_windows"] = {
                 "started": True,
