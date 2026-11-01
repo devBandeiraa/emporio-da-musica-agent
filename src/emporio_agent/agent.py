@@ -70,9 +70,9 @@ class Agent:
         except LLMUnavailableError:
             pass
 
-        # Blocked or truncated answer, or too many rounds: drop the unfinished turn, so a
-        # half-built exchange cannot break the next request.
-        del self._contents[turn_start:]
+        # Blocked or truncated answer, or too many rounds: drop the half-built exchange, which
+        # could break the next request, but keep what the customer said.
+        del self._contents[turn_start + 1 :]
         return FALLBACK_REPLY
 
     def _run_tools(self, requests: tuple[ToolRequest, ...]) -> Any:

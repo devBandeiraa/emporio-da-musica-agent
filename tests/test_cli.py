@@ -75,7 +75,7 @@ def test_rejected_key_exits_with_a_message(chat, capsys):
 
 
 @pytest.mark.parametrize(
-    "error", [ConfigError("ANTHROPIC_API_KEY is not set"), DataError("Missing data file")]
+    "error", [ConfigError("GEMINI_API_KEY is not set"), DataError("Missing data file")]
 )
 def test_setup_errors_exit_with_a_message(monkeypatch, capsys, error):
     def fail():

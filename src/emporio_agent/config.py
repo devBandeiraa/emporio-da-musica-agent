@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 # Campo Grande has been on UTC-4 all year since Brazil dropped daylight saving time in 2019.
 CAMPO_GRANDE = timezone(timedelta(hours=-4))

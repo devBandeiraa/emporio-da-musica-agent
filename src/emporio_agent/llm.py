@@ -126,16 +126,19 @@ class GeminiClient:
     def _generate(
         self, contents: list[Any], config: types.GenerateContentConfig
     ) -> types.GenerateContentResponse:
-        for attempt in range(MAX_ATTEMPTS):
+        def request() -> types.GenerateContentResponse:
+            return self._client.models.generate_content(
+                model=self._model, contents=contents, config=config
+            )
+
+        for attempt in range(MAX_ATTEMPTS - 1):
             try:
-                return self._client.models.generate_content(
-                    model=self._model, contents=contents, config=config
-                )
+                return request()
             except errors.APIError as error:
-                if error.code not in RETRIABLE_STATUS_CODES or attempt == MAX_ATTEMPTS - 1:
+                if error.code not in RETRIABLE_STATUS_CODES:
                     raise
                 time.sleep(FIRST_RETRY_DELAY_SECONDS * 2**attempt)
-        raise AssertionError("unreachable: the last attempt returns or raises")
+        return request()
 
     def create_message(
         self, system: str, contents: list[Any], tools: list[dict[str, Any]]

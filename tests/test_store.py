@@ -84,14 +84,21 @@ def test_missing_file_raises_data_error(tmp_path):
         load_store(tmp_path)
 
 
-def test_broken_reference_raises_data_error(tmp_path):
+@pytest.mark.parametrize(
+    ("file_name", "old", "new", "message"),
+    [
+        ("orders.csv", ",3,2025-10-15,", ",999,2025-10-15,", "unknown customer"),
+        ("products.csv", "Yamaha C40 Nylon Natural,5,", "Yamaha C40 Nylon Natural,99,", "category"),
+        ("promotions.csv", "1,102,10,", "1,9999,10,", "Promotion 1 has an unknown product"),
+        ("order_items.csv", "1,1,93", "1,1,9999", "Order 1 has an unknown product"),
+        ("order_items.csv", "1,1,93", "99,1,93", "Order 1 has no items"),
+    ],
+)
+def test_broken_reference_raises_data_error(tmp_path, file_name, old, new, message):
     for file in DATA_DIR.glob("*.csv"):
         shutil.copy(file, tmp_path / file.name)
-    orders = tmp_path / "orders.csv"
-    orders.write_text(
-        orders.read_text(encoding="utf-8").replace(",3,2025-10-15,", ",999,2025-10-15,"),
-        encoding="utf-8",
-    )
+    broken = tmp_path / file_name
+    broken.write_text(broken.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
 
-    with pytest.raises(DataError, match="unknown customer"):
+    with pytest.raises(DataError, match=message):
         load_store(tmp_path)

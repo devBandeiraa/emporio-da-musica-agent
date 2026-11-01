@@ -66,6 +66,7 @@ class TestSearchProducts:
         assert payload["results"] == []
         assert payload["not_available"][0]["product_id"] == product_id
         assert payload["not_available"][0]["availability"] == availability
+        assert payload["not_available"][0]["alternatives"]
 
     @pytest.mark.parametrize("query", ["saxofone", "saxofone alto", "flauta", "violino"])
     def test_query_for_empty_category_says_so(self, toolbox, query):
@@ -112,6 +113,20 @@ class TestProductDetails:
         assert pricing["final_price"] == "R$ 5.519,08"
         assert pricing["pix_price"] is None
         assert "não acumula" in pricing["pix_note"]
+
+    def test_payment_summary_separates_pix_from_other_methods(self, toolbox):
+        pricing = call(toolbox, "get_product_details", product_id=91)["pricing"]
+        assert pricing["payment_summary"] == (
+            "R$ 854,05 no PIX, R$ 899,00 no débito ou boleto, "
+            "ou em até 8x sem juros de R$ 112,38 no cartão."
+        )
+
+    def test_payment_summary_with_a_promotion_has_a_single_price(self, toolbox):
+        pricing = call(toolbox, "get_product_details", product_id=94)["pricing"]
+        assert pricing["payment_summary"] == (
+            "R$ 5.519,08 em qualquer forma de pagamento, inclusive PIX, "
+            "ou em até 12x sem juros de R$ 459,92 no cartão."
+        )
 
     def test_no_promotion_offers_pix(self, toolbox):
         pricing = call(toolbox, "get_product_details", product_id=95)["pricing"]
@@ -162,9 +177,22 @@ class TestGetOrder:
         assert payload["status"] == "enviado"
         assert payload["items"] == [{"name": "Kala KA-C Concert Mogno", "quantity": 1}]
         assert payload["payment"] == "cartão de débito"
-        assert payload["tracking_code"] == "BRJL5544332BR"
+        assert payload["purchased_on"] == "15/02/2026"
+        assert "tracking_code" not in payload
+        assert "estimated_delivery" not in payload
+        assert "BRJL5544332BR" in payload["shipping_summary"]
+        assert "28/02/2026" in payload["shipping_summary"]
+        assert "há 25 dias" in payload["shipping_summary"]
         assert payload["days_past_estimate"] == 25
         assert payload["return_windows"]["started"] is False
+
+    def test_shipped_order_within_the_estimate_does_not_mention_a_delay(self, store, tmp_path):
+        early = Toolbox(
+            store, now=lambda: datetime(2026, 2, 20, 10), tickets_path=tmp_path / "tickets.jsonl"
+        )
+        summary = call(early, "get_order", order_id=8, contact=ANA_EMAIL)["shipping_summary"]
+        assert "28/02/2026" in summary
+        assert "passou" not in summary
 
     def test_phone_also_verifies(self, toolbox):
         assert call(toolbox, "get_order", order_id=8, contact="67 99654-7821")["verified"] is True
@@ -177,7 +205,7 @@ class TestGetOrder:
         assert windows["withdrawal_7_days"] == {"deadline": "24/02/2026", "open": False}
         assert windows["defect_exchange_30_days"]["open"] is False
         assert windows["legal_warranty_90_days"] == {"deadline": "18/05/2026", "open": True}
-        assert "aproximação" in windows["assumption"]
+        assert "previsão de entrega" in windows["assumption"]
 
     @pytest.mark.parametrize(
         ("order_id", "contact", "total"),
@@ -208,6 +236,7 @@ class TestGetOrder:
         payload = call(toolbox, "get_order", order_id=13, contact="fernanda.ribeiro@coldmail.com")
         assert payload["status"] == "pendente"
         assert payload["tracking_code"] is None
+        assert "shipping_summary" not in payload
         assert "return_windows" not in payload
 
     def test_shared_email_only_opens_the_order_it_belongs_to(self, toolbox):
