@@ -46,7 +46,6 @@ RECEIPT_ASSUMPTION = (
     "porque a data real de recebimento não é registrada."
 )
 WINDOWS_NOT_STARTED = "O pedido ainda não consta como entregue; os prazos contam do recebimento."
-TRACKING_GUIDANCE = "Informe sempre o código de rastreio ao cliente, em qualquer resposta."
 
 ORDER_STATUS_LABELS = {
     "pending": "pendente",
@@ -146,6 +145,16 @@ def _payment_summary(pricing: Pricing) -> str:
     return (
         f"{format_brl(pricing.pix_price)} no PIX, {final} no débito ou boleto, ou {installments}."
     )
+
+
+def _shipping_summary(order: Order, days_late: int) -> str:
+    """A ready sentence: from separate fields, the model kept the tracking code or the delay."""
+    tracking = order.tracking_code or "não registrado"
+    estimate = order.estimated_delivery and _format_date(order.estimated_delivery)
+    summary = f"Rastreio: {tracking}. Previsão de entrega: {estimate or 'não registrada'}."
+    if days_late:
+        summary += f" A previsão já passou há {days_late} dias e o pedido não consta como entregue."
+    return summary
 
 
 def _pricing_payload(pricing: Pricing) -> dict[str, Any]:
@@ -388,9 +397,8 @@ class Toolbox:
         }
         if order.status == "shipped":
             payload["days_past_estimate"] = days_overdue(order, today)
+            payload["shipping_summary"] = _shipping_summary(order, payload["days_past_estimate"])
             payload["return_windows"] = {"started": False, "reason": WINDOWS_NOT_STARTED}
-            if order.tracking_code:
-                payload["tracking_guidance"] = TRACKING_GUIDANCE
         elif windows := return_windows(order, today):
             payload["return_windows"] = {
                 "started": True,

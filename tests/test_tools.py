@@ -178,9 +178,19 @@ class TestGetOrder:
         assert payload["items"] == [{"name": "Kala KA-C Concert Mogno", "quantity": 1}]
         assert payload["payment"] == "cartão de débito"
         assert payload["tracking_code"] == "BRJL5544332BR"
-        assert "rastreio" in payload["tracking_guidance"]
+        assert "BRJL5544332BR" in payload["shipping_summary"]
+        assert "28/02/2026" in payload["shipping_summary"]
+        assert "há 25 dias" in payload["shipping_summary"]
         assert payload["days_past_estimate"] == 25
         assert payload["return_windows"]["started"] is False
+
+    def test_shipped_order_within_the_estimate_does_not_mention_a_delay(self, store, tmp_path):
+        early = Toolbox(
+            store, now=lambda: datetime(2026, 2, 20, 10), tickets_path=tmp_path / "tickets.jsonl"
+        )
+        summary = call(early, "get_order", order_id=8, contact=ANA_EMAIL)["shipping_summary"]
+        assert "28/02/2026" in summary
+        assert "passou" not in summary
 
     def test_phone_also_verifies(self, toolbox):
         assert call(toolbox, "get_order", order_id=8, contact="67 99654-7821")["verified"] is True
@@ -224,7 +234,7 @@ class TestGetOrder:
         payload = call(toolbox, "get_order", order_id=13, contact="fernanda.ribeiro@coldmail.com")
         assert payload["status"] == "pendente"
         assert payload["tracking_code"] is None
-        assert "tracking_guidance" not in payload
+        assert "shipping_summary" not in payload
         assert "return_windows" not in payload
 
     def test_shared_email_only_opens_the_order_it_belongs_to(self, toolbox):
