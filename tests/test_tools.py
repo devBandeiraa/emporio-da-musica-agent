@@ -177,7 +177,8 @@ class TestGetOrder:
         assert payload["status"] == "enviado"
         assert payload["items"] == [{"name": "Kala KA-C Concert Mogno", "quantity": 1}]
         assert payload["payment"] == "cartão de débito"
-        assert payload["tracking_code"] == "BRJL5544332BR"
+        assert "tracking_code" not in payload
+        assert "estimated_delivery" not in payload
         assert "BRJL5544332BR" in payload["shipping_summary"]
         assert "28/02/2026" in payload["shipping_summary"]
         assert "há 25 dias" in payload["shipping_summary"]

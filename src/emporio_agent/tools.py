@@ -398,6 +398,8 @@ class Toolbox:
         if order.status == "shipped":
             payload["days_past_estimate"] = days_overdue(order, today)
             payload["shipping_summary"] = _shipping_summary(order, payload["days_past_estimate"])
+            # Only in the sentence: with its own field, the date was quoted without the code.
+            del payload["tracking_code"], payload["estimated_delivery"]
             payload["return_windows"] = {"started": False, "reason": WINDOWS_NOT_STARTED}
         elif windows := return_windows(order, today):
             payload["return_windows"] = {
