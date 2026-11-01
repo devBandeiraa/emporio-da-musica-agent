@@ -35,7 +35,15 @@ SCENARIOS = (
         ),
         expected_tools=("search_products",),
         must_include=("Yamaha C40", "Tagima Memphis"),
-        must_not_include=("GF-3D", "SN-7C"),
+        must_not_include=(
+            "GF-3D",
+            "SN-7C",
+            "professor",
+            "queridinh",
+            "tradiciona",
+            "procurado",
+            "popular",
+        ),
         example="01-catalog-under-budget",
     ),
     Scenario(
@@ -55,7 +63,8 @@ SCENARIOS = (
             "E se eu desistir depois que chegar, quem paga o frete de volta?",
         ),
         expected_tools=("get_order",),
-        must_include=("7 dias", "28/02"),
+        forbidden_tools=("register_ticket",),
+        must_include=("7 dias", "28/02", "BRJL5544332BR"),
         example="03-return-shipped-order",
     ),
     Scenario(
